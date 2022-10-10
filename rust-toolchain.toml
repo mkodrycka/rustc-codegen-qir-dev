@@ -1,0 +1,11 @@
+[toolchain]
+channel = "nightly-2022-10-02"
+components = [
+    "cargo",
+    "clippy",
+    "rust-src",
+    "rustc",
+    "rustfmt",
+]
+
+profile = "complete"
