@@ -29,3 +29,10 @@ $ nix develop # or nix-shell
 # Rust stable
 $ nix develop ".#stable" # or nix-shell -A devShells.x86_64-linux.stable
 ```
+
+### VS Code integration
+
+This project includes a set of recommended extensions and configuration needed to develop with full
+rust support using the binaries distributed through the nix package manager. Make sure to install the
+recommended extensions for this workspace and then reload the window, which VS code should prompt you
+to do automatically.
