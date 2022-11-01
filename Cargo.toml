@@ -7,6 +7,9 @@ edition = "2021"
 crate-type = ["dylib"]
 
 [dependencies]
+env_logger = "0.9.1"
+log = "0.4.17"
+serde = { version = "1.0", features = ["derive"] }
 
 [package.metadata.rust-analyzer]
 # This crate uses #[feature(rustc_private)]

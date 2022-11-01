@@ -66,6 +66,29 @@
 
             # Specify the prefix to the installed LLVM so that inkwell / llvm-sys can find it at compile time.
             export LLVM_110_PREFIX="${llvm-compat.llvm}";
+
+            # Always show debug message by default
+            export RUST_LOG=DEBUG
+
+            # Quick access to the root dir for this project
+            ROOT_PATH=$(git rev-parse --show-toplevel)
+
+            # Utility function for quickly testing if the bell example compiles correctly. Must be called from within
+            #  the project directory.
+            function compile_bell {
+              pushd "$ROOT_PATH"
+
+              # Build the codegen backend
+              cd "$ROOT_PATH/"
+              cargo build
+
+              # Build the bell example
+              cd "$ROOT_PATH/examples/bell"
+              cargo build
+
+              # Move back to old dir
+              popd
+            }
           '';
 
         in rec {
