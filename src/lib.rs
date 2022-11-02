@@ -64,6 +64,9 @@ pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
     Box::new(QirCodegenBackend::default())
 }
 
+/// Code generation backend for QIR instructions.
+///
+/// QIR can be expressed differently based on the supplied [QirProfile].
 #[derive(Default)]
 pub struct QirCodegenBackend {}
 
@@ -140,17 +143,26 @@ impl CodegenBackend for QirCodegenBackend {
             arch: QIR_ARCH.into(),
 
             // Refer to https://llvm.org/docs/LangRef.html#data-layout
-            // TODO: What should this be? We aren't packing the structure at all, so maybe we can clone
-            //  the host system's data layout?
+            // TODO: What should these be? We aren't packing the structure at all, so maybe we can clone
+            //  the host system's data layout / pointer width?
             data_layout: "e".into(),
-
-            llvm_target: format!("{}-unknown-{}", QIR_ARCH, raw_profile).into(),
             pointer_width: 64,
+
+            // We will model the target triple using the convention of ARCH-VENDOR-PROFILE. The
+            //  arch will always be constant, but the profile should be one which QIR supports.
+            llvm_target: format!("{}-unknown-{}", QIR_ARCH, raw_profile).into(),
+
+            // TODO: Fill this in with options allowing for dynamic libraries. The main issue is that
+            //  the [TargetOptions] struct contains private members, so it cannot be constructed manually.
             options: TargetOptions::default(),
         })
     }
 }
 
+/// A valid QIR profile.
+///
+/// Refer to https://github.com/qir-alliance/qir-spec/tree/spec_update/specification/under_development/profiles
+/// for more info.
 // TODO: Make a common library with data structures to allow for sharing across the various
 //  components.
 #[derive(Serialize, Deserialize)]
