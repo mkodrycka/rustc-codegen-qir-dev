@@ -91,7 +91,7 @@ impl CodegenBackend for QirCodegenBackend {
             allocator_module: None,
             metadata_module: None,
             metadata,
-            crate_info: CrateInfo::new(tcx, "qir".to_string()),
+            crate_info: CrateInfo::new(tcx, QIR_ARCH.into()),
         })
     }
 
@@ -152,11 +152,21 @@ impl CodegenBackend for QirCodegenBackend {
             //  arch will always be constant, but the profile should be one which QIR supports.
             llvm_target: format!("{}-unknown-{}", QIR_ARCH, raw_profile).into(),
 
-            // TODO: Fill this in with options allowing for dynamic libraries. The main issue is that
-            //  the [TargetOptions] struct contains private members, so it cannot be constructed manually.
-            options: TargetOptions::default(),
+            options: generate_qir_target_options(),
         })
     }
+}
+
+/// Generate target options for QIR.
+///
+/// These options correspond to valid compiler actions supported by the QIR spec.
+fn generate_qir_target_options() -> TargetOptions {
+    let mut options = TargetOptions::default();
+
+    // Allow for dylibs
+    options.dynamic_linking = true;
+
+    options
 }
 
 /// A valid QIR profile.
