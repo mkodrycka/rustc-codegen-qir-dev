@@ -28,28 +28,16 @@ use rustc_middle::{
     ty::TyCtxt,
 };
 use rustc_session::{
-    config::{OutputFilenames, Options},
+    config::{Options, OutputFilenames},
     cstore::MetadataLoaderDyn,
     Session,
 };
 use rustc_target::spec::{Target, TargetOptions, TargetTriple};
 
-use log::{
-    debug,
-    error,
-    info,
-    warn,
-};
+use log::{debug, error, info, warn};
 use serde::{
-    de::{
-        value::Error as SerdeError,
-
-        Deserialize as DeserializeTrait,
-        IntoDeserializer
-    },
-
-    Deserialize,
-    Serialize,
+    de::{value::Error as SerdeError, Deserialize as DeserializeTrait, IntoDeserializer},
+    Deserialize, Serialize,
 };
 
 const QIR_ARCH: &'static str = "qir";
@@ -110,7 +98,7 @@ impl CodegenBackend for QirCodegenBackend {
         &self,
         sess: &Session,
         codegen_results: CodegenResults,
-        outputs: &OutputFilenames
+        outputs: &OutputFilenames,
     ) -> Result<(), ErrorGuaranteed> {
         debug!("::CodegenBackend Linking");
 
@@ -122,9 +110,11 @@ impl CodegenBackend for QirCodegenBackend {
         // Here we extract the target triple supplied and make sure that it is a valid option. We return None
         //  otherwise.
         let triple_parts = match &opts.target_triple {
-            TargetTriple::TargetTriple(triple)      => triple,
+            TargetTriple::TargetTriple(triple) => triple,
             TargetTriple::TargetJson { triple, .. } => triple,
-        }.split("-").collect::<Vec<&str>>();
+        }
+        .split("-")
+        .collect::<Vec<&str>>();
 
         // Ensure that we have a valid triple
         if triple_parts.len() != 3 {
@@ -133,7 +123,8 @@ impl CodegenBackend for QirCodegenBackend {
 
         // Match to a valid QIR profile. Invalid profiles will short out.
         let raw_profile = triple_parts[2];
-        let profile: Result<QirProfile, SerdeError> = QirProfile::deserialize(raw_profile.into_deserializer());
+        let profile: Result<QirProfile, SerdeError> =
+            QirProfile::deserialize(raw_profile.into_deserializer());
         match profile {
             Ok(p) => p,
             Err(_) => return None,
