@@ -1,5 +1,6 @@
 {
     "nixEnvSelector.nixFile": "${workspaceRoot}/shell.nix",
     "rust-analyzer.server.path": "rust-analyzer",
-    "rust-analyzer.rustc.source": "discover"
+    "rust-analyzer.rustc.source": "discover",
+    "editor.formatOnSave": true
 }
