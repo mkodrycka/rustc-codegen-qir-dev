@@ -17,9 +17,17 @@
       # Make sure to sync the nixpkgs version with ours
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Naersk allows us to bundle rust projects as packages with minimal setup.
+    naersk = {
+      url = "github:nix-community/naersk";
+
+      # Make sure to sync the nixpkgs version with ours
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, utils, fenix }: utils.lib.eachDefaultSystem (system:
+  outputs = { nixpkgs, utils, fenix, naersk, ... }: utils.lib.eachDefaultSystem (system:
     let
       # Load the pkgs for the current system configuration, making sure to overlay
       #  derivations made available by fenix.
@@ -47,9 +55,10 @@
       # - https://github.com/rust-lang/rust-analyzer/issues/13393
       # - https://github.com/rust-lang/rust/issues/95736
       rustc-src-root = "lib/rustlib/rustc-src/rust/compiler/rustc";
-      rust-toolchain-lockfile = pkgs.runCommand "Cargo.lock" {
-        nativeBuildInputs = with pkgs; [ cargo ];
-      } ''
+      rust-toolchain-lockfile = pkgs.runCommand "Cargo.lock"
+        {
+          nativeBuildInputs = with pkgs; [ cargo ];
+        } ''
         mkdir "$out"
 
         # Cargo does not allow us to generate a lockfile separately from the Cargo.toml location,
@@ -83,7 +92,49 @@
       llvm-compat = pkgs.llvmPackages_11;
       mkClangShell = pkgs.mkShell.override { stdenv = llvm-compat.stdenv; };
 
-    in {
+      # Have naersk use our custom toolchain
+      rustPackager = pkgs.callPackage naersk {
+        cargo = rust-toolchain;
+        rustc = rust-toolchain;
+      };
+
+    in
+    rec
+    {
+      # Expose a few checks for use in CI/CD and local development
+      checks = {
+        build = packages.default;
+        format = pkgs.runCommand "nix-fmt"
+          {
+            buildInputs = [ pkgs.nixpkgs-fmt ];
+          }
+          ''
+            # Out dir needs to be created, regardless of its use
+            mkdir $out
+            nixpkgs-fmt --check ${./flake.nix}
+          '';
+        lint = pkgs.runCommand "nix-lint"
+          {
+            buildInputs = [ pkgs.nix-linter ];
+          }
+          ''
+            # Out dir needs to be created, regardless of its use
+            mkdir $out
+            nix-linter ${./flake.nix}
+          '';
+      };
+
+      # Expose the built codegen backend as a package for use in other projects
+      packages.default = rustPackager.buildPackage {
+        name = "librustc_codegen_qir";
+        src = ./.;
+
+        # This package is primarily a dynamic library, so we ask naersk to bundle the
+        # generated library as well.
+        copyBins = false;
+        copyLibs = true;
+      };
+
       # Expose a number of development shells to be able to quickly switch between latest stable
       #  and nightly envs.
       #
@@ -95,7 +146,7 @@
       devShells =
         let
           # Specify the list of common dependencies used by both stable and nightly rust.
-          commonsDeps = with pkgs; [libiconv libxml2 llvm-compat.llvm];
+          commonsDeps = with pkgs; [ libiconv libxml2 llvm-compat.llvm nixpkgs-fmt ];
 
           # Set up the needed env vars for each session
           # TODO: The LLVM prefix is hardcoded to the version we selected earlier, but shouldn't be.
@@ -130,7 +181,8 @@
             }
           '';
 
-        in rec {
+        in
+        rec {
           default = nightly;
 
           stable = mkClangShell {
