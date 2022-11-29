@@ -1,7 +1,10 @@
+cargo-features = ["per-package-target"]
+
 [package]
 name = "bell"
 version = "0.1.0"
 edition = "2021"
+forced-target = "qir-unknown-base"
 
 [lib]
 crate-type = ["dylib"]
