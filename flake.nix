@@ -166,18 +166,12 @@
             # Utility function for quickly testing if the bell example compiles correctly. Must be called from within
             #  the project directory.
             function compile_bell {
-              pushd "$ROOT_PATH"
-
               # Build the codegen backend
-              cd "$ROOT_PATH/"
-              cargo build
+              cargo build --manifest-path "$ROOT_PATH/Cargo.toml"
 
               # Build the bell example
-              cd "$ROOT_PATH/examples/bell"
-              cargo build
-
-              # Move back to old dir
-              popd
+              RUSTFLAGS="-Zcodegen-backend=$ROOT_PATH/target/debug/librustc_codegen_qir.dylib" \
+                cargo build --manifest-path "$ROOT_PATH/examples/bell/Cargo.toml"
             }
           '';
 
