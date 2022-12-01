@@ -122,6 +122,16 @@
             mkdir $out
             nix-linter ${./flake.nix}
           '';
+        format_rust = pkgs.runCommand "rust-fmt"
+          {
+            buildInputs = with pkgs; [ cargo rustfmt ];
+          }
+          ''
+            # Out dir needs to be created, regardless of its use
+            mkdir $out
+            cargo-fmt fmt --manifest-path ${./.}/Cargo.toml -- --check
+            cargo-fmt fmt --manifest-path ${./examples/bell}/Cargo.toml -- --check
+          '';
       };
 
       # Expose the built codegen backend as a package for use in other projects

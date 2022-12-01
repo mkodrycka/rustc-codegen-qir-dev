@@ -1,0 +1,21 @@
+# This workflow runs automatic code build checks.
+
+# We need a workflow name to be able to schedule it from Github UI
+name: Build
+
+on:
+  # Triggers the workflow on any PR to dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  check_build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Nix
+        uses: cachix/install-nix-action@v17
+      - name: Check Build
+        run: nix build .#checks.x86_64-linux.build 

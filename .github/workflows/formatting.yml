@@ -1,0 +1,23 @@
+# This workflow runs automatic code style checks.
+
+# We need a workflow name to be able to schedule it from Github UI
+name: Formatting
+
+on:
+  # Triggers the workflow on any PR to dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  check_fmt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Nix
+        uses: cachix/install-nix-action@v17
+      - name: Check Flake Formatting
+        run: nix build .#checks.x86_64-linux.format 
+      - name: Check Rust Formatting
+        run: nix build .#checks.x86_64-linux.format_rust
