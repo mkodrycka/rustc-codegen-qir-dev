@@ -1,4 +1,5 @@
 #![feature(rustc_private)]
+#![feature(extern_types)]
 
 // The below are private rustc crates availble behind the `rustc_private` feature.
 extern crate rustc_ast;
@@ -18,7 +19,7 @@ use rustc_codegen_ssa::{
         write::{CodegenContext, FatLTOInput, ModuleConfig, OngoingCodegen},
     },
     traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods},
-    CodegenResults, CompiledModule, CrateInfo, ModuleCodegen,
+    CodegenResults, CompiledModule, CrateInfo, ModuleCodegen, ModuleKind,
 };
 use rustc_errors::{ErrorGuaranteed, FatalError, Handler};
 use rustc_hash::FxHashMap;
@@ -28,7 +29,7 @@ use rustc_middle::{
     ty::TyCtxt,
 };
 use rustc_session::{
-    config::{Options, OutputFilenames},
+    config::{Options, OutputFilenames, OutputType},
     cstore::MetadataLoaderDyn,
     Session,
 };
@@ -39,6 +40,17 @@ use serde::{
     de::{value::Error as SerdeError, Deserialize as DeserializeTrait, IntoDeserializer},
     Deserialize, Serialize,
 };
+use std::ffi::CString;
+use std::fs::{create_dir_all, File};
+use std::io::Write;
+
+mod lto;
+use crate::lto::{
+    from_binary_to_byte_array, from_byte_array_to_binary, QirModuleBuffer, QirThinBuffer,
+};
+
+mod qir_errors;
+use crate::qir_errors::qir_fatal_error_wrapper;
 
 const QIR_ARCH: &'static str = "qir";
 
@@ -55,7 +67,8 @@ pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
 /// Code generation backend for QIR instructions.
 ///
 /// QIR can be expressed differently based on the supplied [QirProfile].
-#[derive(Default)]
+
+#[derive(Default, Clone)]
 pub struct QirCodegenBackend {}
 
 impl CodegenBackend for QirCodegenBackend {
@@ -89,8 +102,6 @@ impl CodegenBackend for QirCodegenBackend {
         sess: &Session,
         outputs: &OutputFilenames,
     ) -> Result<(CodegenResults, FxHashMap<WorkProductId, WorkProduct>), ErrorGuaranteed> {
-        debug!("::CodegenBackend Joining codegen");
-
         todo!()
     }
 
@@ -145,6 +156,119 @@ impl CodegenBackend for QirCodegenBackend {
 
             options: generate_qir_target_options(),
         })
+    }
+}
+
+impl WriteBackendMethods for QirCodegenBackend {
+    type Module = Vec<u32>;
+    type TargetMachine = ();
+    type ModuleBuffer = QirModuleBuffer;
+    type Context = ();
+    type ThinData = ();
+    type ThinBuffer = QirThinBuffer;
+
+    fn run_link(
+        _cgcx: &CodegenContext<Self>,
+        _diag_handler: &Handler,
+        _modules: Vec<ModuleCodegen<Self::Module>>,
+    ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
+        todo!()
+    }
+
+    fn run_fat_lto(
+        _: &CodegenContext<Self>,
+        _: Vec<FatLTOInput<Self>>,
+        _: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
+    ) -> Result<LtoModuleCodegen<Self>, FatalError> {
+        todo!()
+    }
+
+    fn run_thin_lto(
+        cgcx: &CodegenContext<Self>,
+        modules: Vec<(String, Self::ThinBuffer)>,
+        cached_modules: Vec<(SerializedModule<Self::ModuleBuffer>, WorkProduct)>,
+    ) -> Result<(Vec<LtoModuleCodegen<Self>>, Vec<WorkProduct>), FatalError> {
+        lto::run_thin(cgcx, modules, cached_modules)
+    }
+
+    fn print_pass_timings(&self) {
+        todo!()
+    }
+
+    unsafe fn optimize(
+        _: &CodegenContext<Self>,
+        _: &Handler,
+        _: &ModuleCodegen<Self::Module>,
+        _: &ModuleConfig,
+    ) -> Result<(), FatalError> {
+        todo!()
+    }
+
+    unsafe fn optimize_thin(
+        _cgcx: &CodegenContext<Self>,
+        thin_module: ThinModule<Self>,
+    ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
+        let module = ModuleCodegen {
+            module_llvm: from_byte_array_to_binary(thin_module.data())
+                .map_err(|err| {
+                    qir_fatal_error_wrapper(&format!(
+                        "Got the wrong input size: {} ",
+                        err.to_string()
+                    ))
+                })?
+                .to_vec(),
+            name: thin_module.name().to_string(),
+            kind: ModuleKind::Regular,
+        };
+        Ok(module)
+    }
+
+    fn optimize_fat(
+        _: &CodegenContext<Self>,
+        _: &mut ModuleCodegen<Self::Module>,
+    ) -> Result<(), FatalError> {
+        todo!()
+    }
+
+    unsafe fn codegen(
+        cgcx: &CodegenContext<Self>,
+        _diag_handler: &Handler,
+        module: ModuleCodegen<Self::Module>,
+        _config: &ModuleConfig,
+    ) -> Result<CompiledModule, FatalError> {
+        let path = cgcx
+            .output_filenames
+            .temp_path(OutputType::Object, Some(&module.name));
+
+        let qir_module = from_binary_to_byte_array(&module.module_llvm);
+        File::create(&path)
+            .map_err(|err| {
+                qir_fatal_error_wrapper(&format!(
+                    "Could not get {}: {}",
+                    &path.display(),
+                    err.to_string()
+                ))
+            })?
+            .write_all(qir_module)
+            .map_err(|err| {
+                qir_fatal_error_wrapper(&format!("Could not write: {}", err.to_string()))
+            })?;
+
+        Ok(CompiledModule {
+            name: module.name,
+            kind: module.kind,
+            object: Some(path),
+            dwarf_object: None,
+            bytecode: None,
+        })
+    }
+
+    fn prepare_thin(module: ModuleCodegen<Self::Module>) -> (String, Self::ThinBuffer) {
+        (module.name, QirThinBuffer(module.module_llvm))
+    }
+
+    fn serialize_module(module: ModuleCodegen<Self::Module>) -> (String, Self::ModuleBuffer) {
+        (module.name, QirModuleBuffer(module.module_llvm))
     }
 }
 
