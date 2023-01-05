@@ -5,7 +5,6 @@
 extern crate rustc_ast;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
-extern crate rustc_driver;
 extern crate rustc_errors;
 extern crate rustc_hash;
 extern crate rustc_metadata;
@@ -14,13 +13,10 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 
-use rustc_ast::expand::allocator::AllocatorKind;
 use rustc_codegen_ssa::{
     back::{
         lto::{LtoModuleCodegen, SerializedModule, ThinModule},
-        write::{
-            CodegenContext, FatLTOInput, ModuleConfig, OngoingCodegen, TargetMachineFactoryConfig,
-        },
+        write::{CodegenContext, FatLTOInput, ModuleConfig, OngoingCodegen},
     },
     traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods},
     CodegenResults, CompiledModule, CrateInfo, ModuleCodegen, ModuleKind,
@@ -40,8 +36,6 @@ use rustc_session::{
 use rustc_target::spec::{Target, TargetOptions, TargetTriple};
 
 use log::{debug, error, info, warn};
-use rustc_middle::ty::query::Providers;
-use rustc_span::symbol::{sym, Symbol};
 use serde::{
     de::{value::Error as SerdeError, Deserialize as DeserializeTrait, IntoDeserializer},
     Deserialize, Serialize,
@@ -49,20 +43,14 @@ use serde::{
 use std::ffi::CString;
 use std::fs::{create_dir_all, File};
 use std::io::Write;
-use std::sync::Arc;
 
-mod link;
 mod lto;
 use crate::lto::{
     from_binary_to_byte_array, from_byte_array_to_binary, QirModuleBuffer, QirThinBuffer,
 };
 
 use inkwell::context::Context;
-//mod context;
-//use context::CodegenCx;
-
-mod qir_errors;
-use crate::qir_errors::qir_fatal_error_wrapper;
+use inkwell::module::Module;
 
 const QIR_ARCH: &'static str = "qir";
 
@@ -71,9 +59,12 @@ const QIR_ARCH: &'static str = "qir";
 pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
     let _ = std::panic::take_hook();
 
+    // Initialize the logging library
+    env_logger::init();
     info!("::QirCodegenBackend is starting...");
 
     Box::new(QirCodegenBackend::default())
+    info!("::QirCodegenBackend is starting... My test");
 }
 
 /// Code generation backend for QIR instructions.
@@ -83,20 +74,15 @@ pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
 #[derive(Default, Clone)]
 pub struct QirCodegenBackend {}
 
-unsafe impl Send for QirCodegenBackend {}
-unsafe impl Sync for QirCodegenBackend {}
-
 impl CodegenBackend for QirCodegenBackend {
     fn init(&self, sess: &Session) {
         // Initialize the logging library
         env_logger::init();
 
-        info!("::CodegenBackend Initializing the QIR codegen backend");
-    }
-
-    fn provide(&self, providers: &mut Providers) {
-        // FIXME compute list of enabled features from cli flags
-        providers.global_backend_features = |_tcx, ()| vec![];
+        info!("::CodegenBackend Initializing the QIR codegen backend...");
+        let traget_opt = generate_qir_target_options();
+        info!(":TO...");
+        info!(":Generate Target Options {:?}", traget_opt);
     }
 
     fn codegen_crate(
@@ -105,16 +91,8 @@ impl CodegenBackend for QirCodegenBackend {
         metadata: EncodedMetadata,
         need_metadata_module: bool,
     ) -> Box<dyn std::any::Any> {
-        debug!("Codegen create...");
+        info!("::CodegenBackend Codegen crate");
 
-        Box::new(rustc_codegen_ssa::base::codegen_crate(
-            QirCodegenBackend::default(),
-            tcx,
-            String::new(),
-            metadata,
-            need_metadata_module,
-        ))
-        /*
         Box::new(CodegenResults {
             modules: vec![],
             allocator_module: None,
@@ -122,7 +100,6 @@ impl CodegenBackend for QirCodegenBackend {
             metadata,
             crate_info: CrateInfo::new(tcx, QIR_ARCH.into()),
         })
-        */
     }
 
     fn join_codegen(
@@ -131,19 +108,7 @@ impl CodegenBackend for QirCodegenBackend {
         sess: &Session,
         outputs: &OutputFilenames,
     ) -> Result<(CodegenResults, FxHashMap<WorkProductId, WorkProduct>), ErrorGuaranteed> {
-        debug!("::Join codgen");
-        debug!("{:?}", ongoing_codegen);
-        debug!("::Join codgen2");
-
-        let (codegen_results, work_products) = ongoing_codegen
-            .downcast::<OngoingCodegen<Self>>()
-            .expect("Expected OngoingCodegen, found Box<Any>")
-            .join(sess);
-
-        debug!("::Join codgen3");
-        sess.compile_status()?;
-
-        Ok((codegen_results, work_products))
+        todo!()
     }
 
     fn link(
@@ -154,14 +119,11 @@ impl CodegenBackend for QirCodegenBackend {
     ) -> Result<(), ErrorGuaranteed> {
         debug!("::CodegenBackend Linking");
 
-        //link::link(sess, &codegen_results, outputs, "qir_codegen");
-        sess.compile_status()?;
-        Ok(())
+        todo!()
     }
 
     // Note: This is called _before_ init, thus we can't log :(
     fn target_override(&self, opts: &Options) -> Option<Target> {
-        debug!("::Target override");
         // Here we extract the target triple supplied and make sure that it is a valid option. We return None
         //  otherwise.
         let triple_parts = match &opts.target_triple {
@@ -201,21 +163,26 @@ impl CodegenBackend for QirCodegenBackend {
             options: generate_qir_target_options(),
         })
     }
+}
 
-    fn print(&self, _req: rustc_session::config::PrintRequest, _sess: &Session) {}
+/// A module is a collection of functions and
+/// global values.
+pub(crate) struct QIRModule {
+    module: inkwell::module::Module<'static>,
+    context: inkwell::context::Context,
+}
 
-    fn target_features(&self, _sess: &Session, _allow_unstable: bool) -> Vec<Symbol> {
-        vec![]
-    }
+unsafe impl Send for QIRModule {}
+unsafe impl Sync for QIRModule {}
 
-    fn print_passes(&self) {}
-
-    fn print_version(&self) {}
-
-    fn metadata_loader(&self) -> Box<MetadataLoaderDyn> {
-        Box::new(rustc_codegen_ssa::back::metadata::DefaultMetadataLoader)
+impl QIRModule {
+    pub fn new(name: &str) -> Self {
+        let context = Context::create();
+        let module = context.create_module(name);
+        QIRModule { module, context }
     }
 }
+
 
 impl WriteBackendMethods for QirCodegenBackend {
     type Module = Vec<u32>;
@@ -268,12 +235,7 @@ impl WriteBackendMethods for QirCodegenBackend {
     ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
         let module = ModuleCodegen {
             module_llvm: from_byte_array_to_binary(thin_module.data())
-                .map_err(|err| {
-                    qir_fatal_error_wrapper(&format!(
-                        "Got the wrong input size: {} ",
-                        err.to_string()
-                    ))
-                })?
+                .map_err(|_| FatalError {})?
                 .to_vec(),
             name: thin_module.name().to_string(),
             kind: ModuleKind::Regular,
@@ -300,18 +262,9 @@ impl WriteBackendMethods for QirCodegenBackend {
 
         let qir_module = from_binary_to_byte_array(&module.module_llvm);
         File::create(&path)
-            .map_err(|err| {
-                qir_fatal_error_wrapper(&format!(
-                    "Could not get {}: {}",
-                    &path.display(),
-                    err.to_string()
-                ))
-            })?
+            .map_err(|_| FatalError {})?
             .write_all(qir_module)
-            .map_err(|err| {
-                qir_fatal_error_wrapper(&format!("Could not write: {}", err.to_string()))
-            })?;
-
+            .map_err(|_| FatalError {})?;
         Ok(CompiledModule {
             name: module.name,
             kind: module.kind,
@@ -330,86 +283,11 @@ impl WriteBackendMethods for QirCodegenBackend {
     }
 }
 
-impl ExtraBackendMethods for QirCodegenBackend {
-    fn codegen_allocator<'tcx>(
-        &self,
-        _: TyCtxt<'tcx>,
-        _: &str,
-        _: AllocatorKind,
-        _: bool,
-    ) -> Self::Module {
-        todo!()
-    }
-
-    fn compile_codegen_unit(
-        &self,
-        tcx: TyCtxt<'_>,
-        cgu_name: Symbol,
-    ) -> (ModuleCodegen<Self::Module>, u64) {
-        //For now...
-
-        debug!("::Compile_codegen_unit...");
-        let my_module = Vec::new();
-
-        (
-            ModuleCodegen {
-                name: cgu_name.to_string(),
-                module_llvm: my_module,
-                kind: ModuleKind::Regular,
-            },
-            0,
-        )
-    }
-    fn target_machine_factory(
-        &self,
-        _sess: &Session,
-        _opt_level: rustc_session::config::OptLevel,
-        _target_features: &[String],
-    ) -> Arc<(dyn Fn(TargetMachineFactoryConfig) -> Result<(), String> + Send + Sync + 'static)>
-    {
-        Arc::new(|_| Ok(()))
-    }
-
-    fn target_cpu<'b>(&self, sess: &'b Session) -> &'b str {
-        unimplemented!();
-    }
-
-    fn tune_cpu<'b>(&self, sess: &'b Session) -> Option<&'b str> {
-        todo!()
-    }
-
-    /*
-    fn spawn_thread<F, T>(_time_trace: bool, f: F) -> std::thread::JoinHandle<T>
-    where
-        F: FnOnce() -> T,
-        F: Send + 'static,
-        T: Send + 'static,
-    {
-        std::thread::spawn(f)
-    }
-
-    fn spawn_named_thread<F, T>(
-        _time_trace: bool,
-        name: String,
-        f: F,
-    ) -> std::io::Result<std::thread::JoinHandle<T>>
-    where
-        F: FnOnce() -> T,
-        F: Send + 'static,
-        T: Send + 'static,
-    {
-        std::thread::Builder::new().name(name).spawn(f)
-    }
-    */
-}
-
 /// Generate target options for QIR.
 ///
 /// These options correspond to valid compiler actions supported by the QIR spec.
 fn generate_qir_target_options() -> TargetOptions {
     let mut options = TargetOptions::default();
-
-    options.max_atomic_width = Some(0);
 
     // Allow for dylibs
     options.dynamic_linking = true;
