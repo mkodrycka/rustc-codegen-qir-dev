@@ -10,4 +10,5 @@ members = [
 # workspace, shown below.
 exclude = [
     "examples/bell",
+    "examples/no_core",
 ]

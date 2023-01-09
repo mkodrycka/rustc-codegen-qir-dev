@@ -1,0 +1,7 @@
+[build]
+target = "qir-unknown-base"
+rustflags = ["-Zcodegen-backend=../../target/debug/librustc_codegen_qir.dylib"]
+
+[unstable]
+build-std=["core"]
+build-std-features=["compiler-builtins-mem"]

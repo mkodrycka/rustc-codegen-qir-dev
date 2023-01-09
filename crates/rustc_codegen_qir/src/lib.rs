@@ -13,6 +13,10 @@ extern crate rustc_session;
 extern crate rustc_span;
 extern crate rustc_target;
 
+// This prevents duplicating functions and statics
+// that are already part of the host rustc process.
+extern crate rustc_driver;
+
 use rustc_codegen_ssa::{
     back::{
         lto::{LtoModuleCodegen, SerializedModule, ThinModule},
@@ -48,6 +52,8 @@ mod lto;
 use crate::lto::{
     from_binary_to_byte_array, from_byte_array_to_binary, QirModuleBuffer, QirThinBuffer,
 };
+
+use rustc_session::{config::CrateType, output::out_filename};
 
 mod qir_errors;
 use crate::qir_errors::qir_fatal_error_wrapper;
@@ -102,7 +108,12 @@ impl CodegenBackend for QirCodegenBackend {
         sess: &Session,
         outputs: &OutputFilenames,
     ) -> Result<(CodegenResults, FxHashMap<WorkProductId, WorkProduct>), ErrorGuaranteed> {
-        todo!()
+        debug!("::CodegenBackend Join Codegen");
+
+        let codegen_results = ongoing_codegen
+            .downcast::<CodegenResults>()
+            .expect("in join_codegen: ongoing_codegen is not a CodegenResults");
+        Ok((*codegen_results, FxHashMap::default()))
     }
 
     fn link(
@@ -113,7 +124,16 @@ impl CodegenBackend for QirCodegenBackend {
     ) -> Result<(), ErrorGuaranteed> {
         debug!("::CodegenBackend Linking");
 
-        todo!()
+        let crate_name = codegen_results.crate_info.local_crate_name.as_str();
+        for &crate_type in sess.opts.crate_types.iter() {
+            if crate_type != CrateType::Rlib {
+                sess.fatal(&format!("Crate type is {:?}", crate_type));
+            }
+            let output_name = out_filename(sess, crate_type, &outputs, crate_name);
+            let mut out_file = ::std::fs::File::create(output_name).unwrap();
+            write!(out_file, "This has been \"compiled\" successfully.").unwrap();
+        }
+        Ok(())
     }
 
     // Note: This is called _before_ init, thus we can't log :(
@@ -277,6 +297,9 @@ impl WriteBackendMethods for QirCodegenBackend {
 /// These options correspond to valid compiler actions supported by the QIR spec.
 fn generate_qir_target_options() -> TargetOptions {
     let mut options = TargetOptions::default();
+
+    // Disable atomics
+    options.max_atomic_width = Some(0);
 
     // Allow for dylibs
     options.dynamic_linking = true;
