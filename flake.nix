@@ -34,7 +34,7 @@
       pkgs = import nixpkgs {
         inherit system;
 
-        overlays = [ fenix.overlay ];
+        overlays = [ fenix.overlays.default ];
       };
 
       # Instead of manually specifying the rust toolchain, we delegate to a standard
@@ -42,7 +42,7 @@
       #  deterministic builds.
       rust-toolchain = pkgs.fenix.fromToolchainFile {
         file = ./rust-toolchain.toml;
-        sha256 = "pKSkfGypl51d78GwXg6pFJeBxSQCQu7ZzTruYCvSkPA=";
+        sha256 = "sha256-XCI5YbeFeqXFD0ZxQIi/+KJS6kczsrLA0Tzs169o6yA=";
       };
 
       # Cargo tries to update the crate index located in the read-only nix store
@@ -89,7 +89,8 @@
       # TODO: Only LLVM v11 works on darwin aarch64, so it might be good to later
       #  have this version depend on the build host.
       #  https://github.com/NixOS/nixpkgs/issues/166205
-      llvm-compat = pkgs.llvmPackages_11;
+      llvm-version = "11";
+      llvm-compat = pkgs."llvmPackages_${llvm-version}";
       mkClangShell = pkgs.mkShell.override { stdenv = llvm-compat.stdenv; };
 
       # Have naersk use our custom toolchain
@@ -156,7 +157,7 @@
       devShells =
         let
           # Specify the list of common dependencies used by both stable and nightly rust.
-          commonsDeps = with pkgs; [ libiconv libxml2 llvm-compat.llvm nixpkgs-fmt ];
+          commonsDeps = with pkgs; [ libffi libiconv libxml2 llvm-compat.llvm nixpkgs-fmt ];
 
           # Set up the needed env vars for each session
           # TODO: The LLVM prefix is hardcoded to the version we selected earlier, but shouldn't be.
@@ -165,7 +166,7 @@
             export PS1="[rust ${toolchain}] $PS1"
 
             # Specify the prefix to the installed LLVM so that inkwell / llvm-sys can find it at compile time.
-            export LLVM_110_PREFIX="${llvm-compat.llvm}";
+            export LLVM_${llvm-version}0_PREFIX="${llvm-compat.llvm}";
 
             # Always show debug message by default
             export RUST_LOG=DEBUG

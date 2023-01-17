@@ -20,9 +20,9 @@ extern crate rustc_driver;
 use rustc_codegen_ssa::{
     back::{
         lto::{LtoModuleCodegen, SerializedModule, ThinModule},
-        write::{CodegenContext, FatLTOInput, ModuleConfig, OngoingCodegen},
+        write::{CodegenContext, FatLTOInput, ModuleConfig},
     },
-    traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods},
+    traits::{CodegenBackend, WriteBackendMethods},
     CodegenResults, CompiledModule, CrateInfo, ModuleCodegen, ModuleKind,
 };
 use rustc_errors::{ErrorGuaranteed, FatalError, Handler};
@@ -34,18 +34,16 @@ use rustc_middle::{
 };
 use rustc_session::{
     config::{Options, OutputFilenames, OutputType},
-    cstore::MetadataLoaderDyn,
     Session,
 };
 use rustc_target::spec::{Target, TargetOptions, TargetTriple};
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use serde::{
     de::{value::Error as SerdeError, Deserialize as DeserializeTrait, IntoDeserializer},
     Deserialize, Serialize,
 };
-use std::ffi::CString;
-use std::fs::{create_dir_all, File};
+use std::fs::File;
 use std::io::Write;
 
 mod lto;
@@ -124,7 +122,7 @@ impl CodegenBackend for QirCodegenBackend {
     ) -> Result<(), ErrorGuaranteed> {
         debug!("::CodegenBackend Linking");
 
-        let crate_name = codegen_results.crate_info.local_crate_name.as_str();
+        let crate_name = codegen_results.crate_info.local_crate_name;
         for &crate_type in sess.opts.crate_types.iter() {
             if crate_type != CrateType::Rlib {
                 sess.fatal(&format!("Crate type is {:?}", crate_type));
@@ -183,7 +181,6 @@ impl WriteBackendMethods for QirCodegenBackend {
     type Module = Vec<u32>;
     type TargetMachine = ();
     type ModuleBuffer = QirModuleBuffer;
-    type Context = ();
     type ThinData = ();
     type ThinBuffer = QirThinBuffer;
 
@@ -221,13 +218,15 @@ impl WriteBackendMethods for QirCodegenBackend {
         _: &ModuleCodegen<Self::Module>,
         _: &ModuleConfig,
     ) -> Result<(), FatalError> {
-        todo!()
+        warn!("::WriteBackendMethods Optimizations are no-ops");
+        Ok(())
     }
 
     unsafe fn optimize_thin(
         _cgcx: &CodegenContext<Self>,
         thin_module: ThinModule<Self>,
     ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
+        debug!("::WriteBackendMethods Optimize Thin");
         let module = ModuleCodegen {
             module_llvm: from_byte_array_to_binary(thin_module.data())
                 .map_err(|err| {
@@ -256,6 +255,7 @@ impl WriteBackendMethods for QirCodegenBackend {
         module: ModuleCodegen<Self::Module>,
         _config: &ModuleConfig,
     ) -> Result<CompiledModule, FatalError> {
+        debug!("::WriteBackendMethods Codegen");
         let path = cgcx
             .output_filenames
             .temp_path(OutputType::Object, Some(&module.name));
