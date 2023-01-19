@@ -11,7 +11,7 @@ env_logger = "0.9.1"
 log = "0.4.17"
 serde = { version = "1.0", features = ["derive"] }
 tempfile = "3.3.0"
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm11-0"] }
+#inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm11-0"] }
 
 [package.metadata.rust-analyzer]
 # This crate uses #[feature(rustc_private)]

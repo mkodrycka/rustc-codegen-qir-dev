@@ -41,6 +41,7 @@ use rustc_target::spec::{Target, TargetOptions, TargetTriple};
 
 use log::{debug, error, info, warn};
 use rustc_middle::ty::query::Providers;
+use rustc_session::{config::CrateType, output::out_filename};
 use rustc_span::symbol::{sym, Symbol};
 use serde::{
     de::{value::Error as SerdeError, Deserialize as DeserializeTrait, IntoDeserializer},
@@ -56,8 +57,12 @@ mod lto;
 use crate::lto::{
     from_binary_to_byte_array, from_byte_array_to_binary, QirModuleBuffer, QirThinBuffer,
 };
+mod context;
+use crate::context::*;
 
-use inkwell::context::Context;
+//use inkwell::context::Context;
+//use inkwell::types::Type;
+//use inkwell::values::Value;
 //mod context;
 //use context::CodegenCx;
 
@@ -141,7 +146,7 @@ impl CodegenBackend for QirCodegenBackend {
             .join(sess);
 
         debug!("::Join codgen3");
-        sess.compile_status()?;
+        //sess.compile_status()?;
 
         Ok((codegen_results, work_products))
     }
@@ -154,8 +159,15 @@ impl CodegenBackend for QirCodegenBackend {
     ) -> Result<(), ErrorGuaranteed> {
         debug!("::CodegenBackend Linking");
 
-        //link::link(sess, &codegen_results, outputs, "qir_codegen");
-        sess.compile_status()?;
+        let crate_name = codegen_results.crate_info.local_crate_name.as_str();
+        for &crate_type in sess.opts.crate_types.iter() {
+            if crate_type != CrateType::Rlib {
+                sess.fatal(&format!("Crate type is {:?}", crate_type));
+            }
+            let output_name = out_filename(sess, crate_type, &outputs, crate_name);
+            let mut out_file = ::std::fs::File::create(output_name).unwrap();
+            write!(out_file, "This has been \"compiled\" successfully.").unwrap();
+        }
         Ok(())
     }
 
@@ -259,7 +271,8 @@ impl WriteBackendMethods for QirCodegenBackend {
         _: &ModuleCodegen<Self::Module>,
         _: &ModuleConfig,
     ) -> Result<(), FatalError> {
-        todo!()
+        debug!("::Optimize debug...");
+        Ok(())
     }
 
     unsafe fn optimize_thin(
@@ -349,7 +362,9 @@ impl ExtraBackendMethods for QirCodegenBackend {
         //For now...
 
         debug!("::Compile_codegen_unit...");
-        let my_module = Vec::new();
+        let cgu = tcx.codegen_unit(cgu_name);
+        let codegen = QirCodecgenUnit::new(tcx, cgu);
+        let my_module = codegen.assemble();
 
         (
             ModuleCodegen {

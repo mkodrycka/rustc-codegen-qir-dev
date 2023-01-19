@@ -1,0 +1,8 @@
+[build]
+target = "qir-unknown-base"
+rustflags = [
+    "-Zcodegen-backend=/Users/monikak/Documents/repos/rustc-codegen-qir/target/debug/librustc_codegen_qir.dylib"]
+
+[unstable]
+#build-std=["core"]
+build-std-features=["compiler-builtins-mem"]

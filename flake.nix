@@ -86,10 +86,10 @@
       });
 
       # Pin to a specific version of LLVM that works with QIR.
-      # TODO: Only LLVM v11 works on darwin aarch64, so it might be good to later
+      # TODO: Only LLVM v13 works on darwin aarch64, so it might be good to later
       #  have this version depend on the build host.
       #  https://github.com/NixOS/nixpkgs/issues/166205
-      llvm-compat = pkgs.llvmPackages_11;
+      llvm-compat = pkgs.llvmPackages_13;
       mkClangShell = pkgs.mkShell.override { stdenv = llvm-compat.stdenv; };
 
       # Have naersk use our custom toolchain
@@ -165,7 +165,7 @@
             export PS1="[rust ${toolchain}] $PS1"
 
             # Specify the prefix to the installed LLVM so that inkwell / llvm-sys can find it at compile time.
-            export LLVM_110_PREFIX="${llvm-compat.llvm}";
+            export LLVM_130_PREFIX="${llvm-compat.llvm}";
 
             # Always show debug message by default
             export RUST_LOG=DEBUG
