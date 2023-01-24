@@ -13,57 +13,20 @@ use rustc_middle::dep_graph::WorkProduct;
 use std::ffi::CString;
 use std::sync::Arc;
 
-pub struct QirModuleBuffer(pub Vec<u32>);
+pub struct QirModuleBuffer(pub Vec<u8>);
 
 impl ModuleBufferMethods for QirModuleBuffer {
     fn data(&self) -> &[u8] {
-        from_binary_to_byte_array(&self.0)
+        &self.0
     }
 }
 
-pub struct QirThinBuffer(pub Vec<u32>);
+pub struct QirThinBuffer(pub Vec<u8>);
 
 impl ThinBufferMethods for QirThinBuffer {
     fn data(&self) -> &[u8] {
-        from_binary_to_byte_array(&self.0)
+        &self.0
     }
-}
-
-/// Convert a binary being stored as 32 bit words into a byte array.
-#[inline]
-pub fn from_binary_to_byte_array(bin: &[u32]) -> &[u8] {
-    // This is an unsafe operation since we don't have assurance that
-    // 1) given pointer is valid for len elements,
-    // 2) the lifetime inferred is an appropriate lifetime for the returned slice.
-
-    // See more details about std::slice::from_raw_parts's safety:
-    // https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
-    unsafe {
-        std::slice::from_raw_parts(bin.as_ptr().cast(), bin.len() * std::mem::size_of::<u32>())
-    }
-}
-
-/// Convert a regular byte array into a binary of 32 bit words.
-#[inline]
-pub fn from_byte_array_to_binary(bytes: &[u8]) -> Result<&[u32], FatalError> {
-    // This should fail if the input is not `% sizeof(u32)`.
-    if bytes.len() % std::mem::size_of::<u32>() != 0 {
-        return Err(FatalError);
-    }
-
-    // This is an unsafe operation since we don't have assurance that
-    // 1) given pointer is valid for len elements,
-    // 2) the lifetime inferred is an appropriate lifetime for the returned slice.
-
-    // See more details about std::slice::from_raw_parts's safety:
-    // https://doc.rust-lang.org/std/slice/fn.from_raw_parts.html
-    #[allow(clippy::size_of_in_element_count)]
-    Ok(unsafe {
-        std::slice::from_raw_parts(
-            bytes.as_ptr().cast(),
-            bytes.len() / std::mem::size_of::<u32>(),
-        )
-    })
 }
 
 // In fact this this is simply plumbing, a no-op right now.

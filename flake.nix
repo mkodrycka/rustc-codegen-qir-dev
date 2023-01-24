@@ -140,6 +140,10 @@
         name = "librustc_codegen_qir";
         src = ./.;
 
+        # LLVM is needed for generating IR, so we inform llvm-sys of its location
+        buildInputs = with pkgs; [ llvm-compat.llvm libffi libxml2 ];
+        "LLVM_${llvm-version}0_PREFIX" = llvm-compat.llvm;
+
         # This package is primarily a dynamic library, so we ask naersk to bundle the
         # generated library as well.
         copyBins = false;

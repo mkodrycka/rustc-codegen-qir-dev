@@ -2,11 +2,14 @@
 #![feature(extern_types)]
 
 // The below are private rustc crates availble behind the `rustc_private` feature.
+extern crate rustc_abi;
 extern crate rustc_ast;
 extern crate rustc_codegen_ssa;
+extern crate rustc_const_eval;
 extern crate rustc_data_structures;
 extern crate rustc_errors;
 extern crate rustc_hash;
+extern crate rustc_hir;
 extern crate rustc_metadata;
 extern crate rustc_middle;
 extern crate rustc_session;
@@ -17,20 +20,22 @@ extern crate rustc_target;
 // that are already part of the host rustc process.
 extern crate rustc_driver;
 
+use inkwell::context::Context;
+use rustc_ast::expand::allocator::AllocatorKind;
 use rustc_codegen_ssa::{
     back::{
         lto::{LtoModuleCodegen, SerializedModule, ThinModule},
-        write::{CodegenContext, FatLTOInput, ModuleConfig},
+        write::{CodegenContext, FatLTOInput, ModuleConfig, OngoingCodegen},
     },
-    traits::{CodegenBackend, WriteBackendMethods},
-    CodegenResults, CompiledModule, CrateInfo, ModuleCodegen, ModuleKind,
+    traits::{CodegenBackend, ExtraBackendMethods, WriteBackendMethods},
+    CodegenResults, CompiledModule, ModuleCodegen, ModuleKind,
 };
 use rustc_errors::{ErrorGuaranteed, FatalError, Handler};
 use rustc_hash::FxHashMap;
 use rustc_metadata::EncodedMetadata;
 use rustc_middle::{
     dep_graph::{WorkProduct, WorkProductId},
-    ty::TyCtxt,
+    ty::{query, TyCtxt},
 };
 use rustc_session::{
     config::{Options, OutputFilenames, OutputType},
@@ -43,13 +48,16 @@ use serde::{
     de::{value::Error as SerdeError, Deserialize as DeserializeTrait, IntoDeserializer},
     Deserialize, Serialize,
 };
-use std::fs::File;
+use std::any::Any;
 use std::io::Write;
+use std::{fs::File, sync::Arc};
 
+mod builder;
+mod codegen;
 mod lto;
-use crate::lto::{
-    from_binary_to_byte_array, from_byte_array_to_binary, QirModuleBuffer, QirThinBuffer,
-};
+
+use crate::codegen::QirCodegenCompiler;
+use crate::lto::{QirModuleBuffer, QirThinBuffer};
 
 use rustc_session::{config::CrateType, output::out_filename};
 
@@ -65,15 +73,15 @@ pub fn __rustc_codegen_backend() -> Box<dyn CodegenBackend> {
 
     info!("::QirCodegenBackend is starting...");
 
-    Box::new(QirCodegenBackend::default())
+    Box::new(QirCodegenBackend)
 }
 
 /// Code generation backend for QIR instructions.
 ///
 /// QIR can be expressed differently based on the supplied [QirProfile].
 
-#[derive(Default, Clone)]
-pub struct QirCodegenBackend {}
+#[derive(Debug, Clone)]
+pub struct QirCodegenBackend;
 
 impl CodegenBackend for QirCodegenBackend {
     fn init(&self, sess: &Session) {
@@ -88,30 +96,35 @@ impl CodegenBackend for QirCodegenBackend {
         tcx: TyCtxt<'_>,
         metadata: EncodedMetadata,
         need_metadata_module: bool,
-    ) -> Box<dyn std::any::Any> {
-        debug!("::CodegenBackend Codegen crate");
-
-        Box::new(CodegenResults {
-            modules: vec![],
-            allocator_module: None,
-            metadata_module: None,
+    ) -> Box<dyn Any> {
+        Box::new(rustc_codegen_ssa::base::codegen_crate(
+            Self,
+            tcx,
+            tcx.sess
+                .opts
+                .cg
+                .target_cpu
+                .clone()
+                .unwrap_or_else(|| tcx.sess.target.cpu.to_string()),
             metadata,
-            crate_info: CrateInfo::new(tcx, QIR_ARCH.into()),
-        })
+            need_metadata_module,
+        ))
     }
 
     fn join_codegen(
         &self,
-        ongoing_codegen: Box<dyn std::any::Any>,
+        ongoing_codegen: Box<dyn Any>,
         sess: &Session,
-        outputs: &OutputFilenames,
+        _outputs: &OutputFilenames,
     ) -> Result<(CodegenResults, FxHashMap<WorkProductId, WorkProduct>), ErrorGuaranteed> {
-        debug!("::CodegenBackend Join Codegen");
+        let (codegen_results, work_products) = ongoing_codegen
+            .downcast::<OngoingCodegen<Self>>()
+            .expect("Expected OngoingCodegen, found Box<Any>")
+            .join(sess);
 
-        let codegen_results = ongoing_codegen
-            .downcast::<CodegenResults>()
-            .expect("in join_codegen: ongoing_codegen is not a CodegenResults");
-        Ok((*codegen_results, FxHashMap::default()))
+        sess.compile_status()?;
+
+        Ok((codegen_results, work_products))
     }
 
     fn link(
@@ -132,6 +145,11 @@ impl CodegenBackend for QirCodegenBackend {
             write!(out_file, "This has been \"compiled\" successfully.").unwrap();
         }
         Ok(())
+    }
+
+    fn provide(&self, providers: &mut query::Providers) {
+        // TODO: We can probably parse the QIR profile here instead of in `target_override`...
+        providers.global_backend_features = |_tcx, ()| vec![];
     }
 
     // Note: This is called _before_ init, thus we can't log :(
@@ -178,7 +196,7 @@ impl CodegenBackend for QirCodegenBackend {
 }
 
 impl WriteBackendMethods for QirCodegenBackend {
-    type Module = Vec<u32>;
+    type Module = Vec<u8>;
     type TargetMachine = ();
     type ModuleBuffer = QirModuleBuffer;
     type ThinData = ();
@@ -227,19 +245,7 @@ impl WriteBackendMethods for QirCodegenBackend {
         thin_module: ThinModule<Self>,
     ) -> Result<ModuleCodegen<Self::Module>, FatalError> {
         debug!("::WriteBackendMethods Optimize Thin");
-        let module = ModuleCodegen {
-            module_llvm: from_byte_array_to_binary(thin_module.data())
-                .map_err(|err| {
-                    qir_fatal_error_wrapper(&format!(
-                        "Got the wrong input size: {} ",
-                        err.to_string()
-                    ))
-                })?
-                .to_vec(),
-            name: thin_module.name().to_string(),
-            kind: ModuleKind::Regular,
-        };
-        Ok(module)
+        todo!()
     }
 
     fn optimize_fat(
@@ -260,7 +266,6 @@ impl WriteBackendMethods for QirCodegenBackend {
             .output_filenames
             .temp_path(OutputType::Object, Some(&module.name));
 
-        let qir_module = from_binary_to_byte_array(&module.module_llvm);
         File::create(&path)
             .map_err(|err| {
                 qir_fatal_error_wrapper(&format!(
@@ -269,7 +274,7 @@ impl WriteBackendMethods for QirCodegenBackend {
                     err.to_string()
                 ))
             })?
-            .write_all(qir_module)
+            .write_all(&module.module_llvm)
             .map_err(|err| {
                 qir_fatal_error_wrapper(&format!("Could not write: {}", err.to_string()))
             })?;
@@ -281,6 +286,7 @@ impl WriteBackendMethods for QirCodegenBackend {
             dwarf_object: None,
             bytecode: None,
         })
+        // todo!()
     }
 
     fn prepare_thin(module: ModuleCodegen<Self::Module>) -> (String, Self::ThinBuffer) {
@@ -289,6 +295,61 @@ impl WriteBackendMethods for QirCodegenBackend {
 
     fn serialize_module(module: ModuleCodegen<Self::Module>) -> (String, Self::ModuleBuffer) {
         (module.name, QirModuleBuffer(module.module_llvm))
+    }
+}
+
+impl ExtraBackendMethods for QirCodegenBackend {
+    fn codegen_allocator<'tcx>(
+        &self,
+        tcx: TyCtxt<'tcx>,
+        module_name: &str,
+        kind: AllocatorKind,
+        alloc_handler_error_kind: AllocatorKind,
+    ) -> Self::Module {
+        debug!("::ExtraBackendMethods Codegen Allocator");
+        todo!()
+    }
+
+    fn compile_codegen_unit(
+        &self,
+        tcx: TyCtxt<'_>,
+        cgu_name: rustc_span::Symbol,
+    ) -> (ModuleCodegen<Self::Module>, u64) {
+        debug!("::ExtraBackendMethods Compile Codegen Unit");
+
+        let cgu = tcx.codegen_unit(cgu_name);
+        let context = Context::create();
+        let codegen = QirCodegenCompiler::new(tcx, cgu, &context);
+
+        let module = match codegen.compile() {
+            Ok(m) => m,
+            Err(e) => tcx
+                .sess
+                .fatal(format!("could not compile module {cgu_name}: {e}")),
+        };
+
+        // Inform the compiler of the ongoing work and its cost
+        // TODO: How can we measure the cost?
+        (
+            ModuleCodegen {
+                name: cgu_name.to_string(),
+                module_llvm: module.write_bitcode_to_memory().as_slice().to_vec(),
+                kind: ModuleKind::Regular,
+            },
+            0,
+        )
+    }
+
+    fn target_machine_factory(
+        &self,
+        sess: &Session,
+        opt_level: rustc_session::config::OptLevel,
+        target_features: &[String],
+    ) -> rustc_codegen_ssa::back::write::TargetMachineFactoryFn<Self> {
+        debug!("::ExtraBackendMethods Target Machine Factory");
+
+        // TODO: What should this do? It's apparently passed the result of the `CodegenBackend::provide` method...
+        Arc::new(|_| Ok(()))
     }
 }
 
@@ -313,7 +374,7 @@ fn generate_qir_target_options() -> TargetOptions {
 /// for more info.
 // TODO: Make a common library with data structures to allow for sharing across the various
 //  components.
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 enum QirProfile {
     #[serde(rename = "base")]
     Base,
